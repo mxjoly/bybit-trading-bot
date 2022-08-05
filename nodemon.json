@@ -1,0 +1,5 @@
+{
+  "verbose": false,
+  "ignore": ["**"],
+  "delay": 200
+}

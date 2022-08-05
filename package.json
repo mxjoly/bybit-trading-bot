@@ -1,0 +1,30 @@
+{
+  "name": "bybit-trading-bot",
+  "version": "1.0.0",
+  "description": "Bybit trading bot",
+  "keywords": [],
+  "author": "Maxime Joly <maxime.joly2808@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/mxjoly/bybit-trading-bot#readme",
+  "scripts": {
+    "start": "NODE_ENV=production nodemon ./build/server.js",
+    "dev": "NODE_ENV=development nodemon ./build/server.js",
+    "build": "NODE_ENV=production tsc",
+    "build:dev": "NODE_ENV=development tsc"
+  },
+  "dependencies": {
+    "bybit-api": "^2.3.0",
+    "chalk": "^4.1.2",
+    "dayjs": "^1.11.4",
+    "dotenv": "^16.0.1",
+    "minimist": "^1.2.6",
+    "node-telegram-bot-api": "^0.58.0",
+    "nodemon": "^2.0.19",
+    "safe-require": "^1.0.4",
+    "technicalindicators": "^3.1.0",
+    "winston": "^3.8.1"
+  },
+  "devDependencies": {
+    "typescript": "^4.7.4"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "base": "USDT",
+  "assets": ["SOL", "AVAX", "EGLD", "LINK", "NEAR"],
+  "max_margin_position": 2000,
+  "initial_margin_position": 200,
+  "leverage": 10,
+  "repurchase_percent_delta": 0.25
+}
