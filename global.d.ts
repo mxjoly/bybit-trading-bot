@@ -4,6 +4,7 @@ interface BotConfig {
   max_margin_position: number;
   initial_margin_position: number;
   leverage: number;
+  take_profit_percent: number;
   repurchase_percent_delta: number;
 }
 
@@ -20,4 +21,8 @@ interface Candle {
   confirm: boolean;
   cross_seq: number;
   timestamp: number;
+}
+
+interface Order {
+  symbol: string;
 }

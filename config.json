@@ -1,8 +1,9 @@
 {
   "base": "USDT",
-  "assets": ["SOL", "AVAX", "EGLD", "LINK", "NEAR"],
+  "assets": ["ETH"],
   "max_margin_position": 2000,
   "initial_margin_position": 200,
   "leverage": 10,
-  "repurchase_percent_delta": 0.25
+  "take_profit_percent": 0.01,
+  "repurchase_percent_delta": 0.05
 }
