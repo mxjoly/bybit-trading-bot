@@ -5,5 +5,6 @@
   "initial_margin_position": 200,
   "leverage": 10,
   "take_profit_percent": 0.01,
-  "repurchase_percent_delta": 0.05
+  "repurchase_percent_delta": 0.05,
+  "interval": "5"
 }

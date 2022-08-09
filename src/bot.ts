@@ -1,7 +1,12 @@
 import { LinearClient, SymbolInfo, WebsocketClient } from 'bybit-api';
+import dayjs from 'dayjs';
+import { intervalToMinutes } from './utils/interval';
 import { error, log } from './utils/log';
 import { calculatePrice, getPositionSize } from './utils/symbol';
 import { getWsConfig, getWsLogger } from './ws';
+import { MACD, CrossUp } from 'technicalindicators';
+import { decimalFloor } from './utils/math';
+import { sendTelegramMessage } from './utils/telegram';
 
 class Bot {
   private client: LinearClient;
@@ -10,9 +15,20 @@ class Bot {
   private orderSocket: WebsocketClient;
   private config: BotConfig;
 
+  // Time
+  private currentDay: string;
+  private currentMonth: string;
+  private lastDayBalance: number;
+  private lastMonthBalance: number;
+  private currentBalance: number; // temp balance
+
   constructor(client: LinearClient, config: BotConfig) {
     this.client = client;
     this.config = config;
+    this.candleSockets = {};
+    this.symbolInfos = {};
+    this.currentDay = dayjs(Date.now()).format('DD/MM/YYYY');
+    this.currentMonth = dayjs(Date.now()).format('MM/YYYY');
   }
 
   public async prepare() {
@@ -27,9 +43,6 @@ class Bot {
         sell_leverage: this.config.leverage,
       });
     });
-
-    this.candleSockets = {};
-    this.symbolInfos = {};
 
     const allInfos = await this.client.getSymbols();
     this.config.assets.forEach((asset) => {
@@ -85,11 +98,38 @@ class Bot {
   }
 
   public async run() {
+    // Store account information to local
+    this.currentBalance = Number(
+      (await this.client.getWalletBalance()).result[this.config.base]
+        .wallet_balance
+    );
+    this.lastMonthBalance = this.currentBalance;
+    this.lastDayBalance = this.currentBalance;
+
     Object.entries(this.candleSockets).forEach(([symbol, socket]) => {
       socket.on('update', (data) => {
+        const candle = data.data[0] as WebsocketCandle; // 0: previous confirm candle, 1: current candle
+
         if (/^candle.[0-9DWM]+.[A-Z]+USDT$/g.test(data.topic)) {
-          const candle = data.data[0] as Candle; // 0: previous confirm candle, 1: current candle
           this.onCandleChange(symbol, candle);
+        }
+
+        // Day change ?
+        let candleDay = dayjs(new Date(candle.close * 1000)).format(
+          'DD/MM/YYYY'
+        );
+        if (candleDay !== this.currentDay) {
+          this.sendDailyResult();
+          this.currentDay = candleDay;
+        }
+
+        // Month change ?
+        let candleMonth = dayjs(new Date(candle.close * 1000)).format(
+          'MM/YYYY'
+        );
+        if (candleMonth !== this.currentMonth) {
+          this.sendMonthResult();
+          this.currentMonth = candleMonth;
         }
       });
     });
@@ -107,17 +147,51 @@ class Bot {
     this.orderSocket.unsubscribe('order');
   }
 
-  private async onCandleChange(symbol: string, lastCandle: Candle) {
+  private async loadCandles(symbol: string, interval: Interval) {
+    const minutes = intervalToMinutes(interval);
+    const limit = 200; // api limit
+    const data = await this.client.getKline({
+      symbol,
+      interval: this.config.interval,
+      from: Math.round(
+        dayjs()
+          .subtract(minutes * limit, 'minutes')
+          .valueOf() / 1000
+      ),
+      limit,
+    });
+    const candles: Candle[] = data.result.slice(0, data.result.length - 1);
+    return candles;
+  }
+
+  private async onCandleChange(symbol: string, lastCandle: WebsocketCandle) {
     const bothSidePosition = await this.client.getPosition({
       symbol,
     }); // 0: Buy side 1: Sell side
     const activeOrders = await this.client.queryActiveOrder({
       symbol,
     });
+    const candles = await this.loadCandles(symbol, this.config.interval);
 
     const position = bothSidePosition.result[0];
     const hasPosition = position.position_margin > 0;
+
+    // ===================== Buy Strategy ===================== //
+    // const macd = MACD.calculate({
+    //   fastPeriod: 12,
+    //   slowPeriod: 26,
+    //   signalPeriod: 9,
+    //   values: candles.map((c) => c.close),
+    //   SimpleMAOscillator: false,
+    //   SimpleMASignal: false,
+    // });
+    // const results = CrossUp.calculate({
+    //   lineA: macd.map((a) => a.MACD),
+    //   lineB: macd.map((a) => a.signal),
+    // });
+    // const buy = results[results.length - 1];
     const buy = true;
+    // ======================================================== //
 
     if (buy && !hasPosition && activeOrders.result.length === 0) {
       const quantity = getPositionSize(
@@ -145,11 +219,8 @@ class Bot {
     }
   }
 
-  private async onExecutionOrder(order: Order[]) {
+  private async onExecutionOrder(order: WebsocketOrder[]) {
     const positions = await this.client.getPosition({
-      symbol: order[0].symbol,
-    });
-    const activeOrders = await this.client.queryActiveOrder({
       symbol: order[0].symbol,
     });
 
@@ -205,8 +276,58 @@ class Bot {
         })
         .catch(error);
     } else {
+      // Update the current balance
+      this.currentBalance = Number(
+        (await this.client.getWalletBalance()).result[this.config.base]
+          .wallet_balance
+      );
+      log(`TP reach on ${order[0].symbol}`);
       this.client.cancelAllActiveOrders({ symbol: position.symbol });
     }
+  }
+
+  private sendDailyResult() {
+    let performance = decimalFloor(
+      ((this.currentBalance - this.lastDayBalance) / this.lastDayBalance) * 100,
+      2
+    );
+
+    let emoji = performance >= 0 ? '🟢' : '🔴';
+    let message = `Day result of ${this.currentDay}: ${
+      performance > 0 ? `<b>+${performance}%</b>` : `${performance}%`
+    } ${emoji}`;
+
+    sendTelegramMessage(message);
+  }
+
+  private sendMonthResult() {
+    let performance = decimalFloor(
+      ((this.currentBalance - this.lastMonthBalance) / this.lastMonthBalance) *
+        100,
+      2
+    );
+
+    let emoji =
+      performance > 30
+        ? '🤩'
+        : performance > 20
+        ? '🤑'
+        : performance > 10
+        ? '😍'
+        : performance > 0
+        ? '🥰'
+        : performance > -10
+        ? '😢'
+        : performance > -20
+        ? '😰'
+        : '😭';
+
+    let message =
+      `<b>MONTH RESULT - ${this.currentMonth}</b>` +
+      '\n' +
+      `${performance > 0 ? `+${performance}%` : `${performance}%`} ${emoji}`;
+
+    sendTelegramMessage(message);
   }
 }
 
