@@ -1,10 +1,10 @@
 {
   "base": "USDT",
   "assets": ["ETH"],
-  "max_margin_position": 2000,
-  "initial_margin_position": 200,
+  "max_margin_position": 5000,
+  "initial_margin_position": 250,
   "leverage": 10,
   "take_profit_percent": 0.01,
-  "repurchase_percent_delta": 0.05,
-  "interval": "5"
+  "repurchase_percent_delta": 0.09,
+  "interval": "15"
 }

@@ -177,20 +177,22 @@ class Bot {
     const hasPosition = position.position_margin > 0;
 
     // ===================== Buy Strategy ===================== //
-    // const macd = MACD.calculate({
-    //   fastPeriod: 12,
-    //   slowPeriod: 26,
-    //   signalPeriod: 9,
-    //   values: candles.map((c) => c.close),
-    //   SimpleMAOscillator: false,
-    //   SimpleMASignal: false,
-    // });
-    // const results = CrossUp.calculate({
-    //   lineA: macd.map((a) => a.MACD),
-    //   lineB: macd.map((a) => a.signal),
-    // });
-    // const buy = results[results.length - 1];
-    const buy = true;
+    const macd = MACD.calculate({
+      fastPeriod: 12,
+      slowPeriod: 26,
+      signalPeriod: 9,
+      values: candles.map((c) => c.close),
+      SimpleMAOscillator: false,
+      SimpleMASignal: false,
+    });
+
+    const results = CrossUp.calculate({
+      lineA: macd.map((a) => a.MACD),
+      lineB: macd.map((a) => a.signal),
+    });
+
+    const buy = results[results.length - 1] && macd.slice(-1)[0].signal < 0;
+    // const buy = true;
     // ======================================================== //
 
     if (buy && !hasPosition && activeOrders.result.length === 0) {
@@ -231,7 +233,9 @@ class Bot {
 
       const tp = calculatePrice(
         position.entry_price,
-        this.config.take_profit_percent,
+        position.position_margin < this.config.max_margin_position
+          ? this.config.take_profit_percent
+          : 0,
         this.symbolInfos[position.symbol]
       );
       const repurchase = calculatePrice(
@@ -239,6 +243,7 @@ class Bot {
         -this.config.repurchase_percent_delta,
         this.symbolInfos[position.symbol]
       );
+
       // TP order
       this.client
         .placeActiveOrder({
@@ -256,25 +261,28 @@ class Bot {
           log(`Create Sell limit ${position.size}${position.symbol} at ${tp}`);
         })
         .catch(error);
-      // Repurchase order
-      this.client
-        .placeActiveOrder({
-          symbol: position.symbol,
-          order_type: 'Limit',
-          side: 'Buy',
-          price: repurchase,
-          qty: position.size,
-          reduce_only: false,
-          close_on_trigger: false,
-          time_in_force: 'GoodTillCancel',
-          position_idx: 1,
-        })
-        .then(() => {
-          log(
-            `Create Buy limit ${position.size}${position.symbol} at ${repurchase}`
-          );
-        })
-        .catch(error);
+
+      if (position.position_margin < this.config.max_margin_position) {
+        // Repurchase order
+        this.client
+          .placeActiveOrder({
+            symbol: position.symbol,
+            order_type: 'Limit',
+            side: 'Buy',
+            price: repurchase,
+            qty: position.size,
+            reduce_only: false,
+            close_on_trigger: false,
+            time_in_force: 'GoodTillCancel',
+            position_idx: 1,
+          })
+          .then(() => {
+            log(
+              `Create Buy limit ${position.size}${position.symbol} at ${repurchase}`
+            );
+          })
+          .catch(error);
+      }
     } else {
       // Update the current balance
       this.currentBalance = Number(
