@@ -1,7 +1,7 @@
 {
   "base": "USDT",
   "assets": ["ETH"],
-  "max_margin_position": 5000,
+  "max_margin_position": 4000,
   "initial_margin_position": 250,
   "leverage": 10,
   "take_profit_percent": 0.01,
