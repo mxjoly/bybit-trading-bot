@@ -4,9 +4,9 @@ import { intervalToMinutes } from './utils/interval';
 import { error, log } from './utils/log';
 import { calculatePrice, getPositionSize } from './utils/symbol';
 import { getWsConfig, getWsLogger } from './ws';
-import { MACD, CrossUp } from 'technicalindicators';
 import { decimalFloor } from './utils/math';
 import { sendTelegramMessage } from './utils/telegram';
+import { macdStrategy } from './strategy';
 
 class Bot {
   private client: LinearClient;
@@ -38,7 +38,7 @@ class Bot {
       this.client.setPositionTpSlMode({ symbol, tp_sl_mode: 'Full' });
       this.client.setMarginSwitch({
         symbol,
-        is_isolated: true,
+        is_isolated: false,
         buy_leverage: this.config.leverage,
         sell_leverage: this.config.leverage,
       });
@@ -115,7 +115,7 @@ class Bot {
         }
 
         // Day change ?
-        let candleDay = dayjs(new Date(candle.close * 1000)).format(
+        let candleDay = dayjs(new Date(candle.start * 1000)).format(
           'DD/MM/YYYY'
         );
         if (candleDay !== this.currentDay) {
@@ -124,7 +124,7 @@ class Bot {
         }
 
         // Month change ?
-        let candleMonth = dayjs(new Date(candle.close * 1000)).format(
+        let candleMonth = dayjs(new Date(candle.start * 1000)).format(
           'MM/YYYY'
         );
         if (candleMonth !== this.currentMonth) {
@@ -173,31 +173,23 @@ class Bot {
     });
     const candles = await this.loadCandles(symbol, this.config.interval);
 
+    const balance = (await this.client.getWalletBalance()).result[
+      this.config.base
+    ];
+
     const position = bothSidePosition.result[0];
     const hasPosition = position.position_margin > 0;
 
     // ===================== Buy Strategy ===================== //
-    const macd = MACD.calculate({
-      fastPeriod: 12,
-      slowPeriod: 26,
-      signalPeriod: 9,
-      values: candles.map((c) => c.close),
-      SimpleMAOscillator: false,
-      SimpleMASignal: false,
-    });
-
-    const results = CrossUp.calculate({
-      lineA: macd.map((a) => a.MACD),
-      lineB: macd.map((a) => a.signal),
-    });
-
-    const buy = results[results.length - 1] && macd.slice(-1)[0].signal < 0;
+    const buy = macdStrategy(candles);
     // const buy = true;
     // ======================================================== //
 
     if (buy && !hasPosition && activeOrders.result.length === 0) {
       const quantity = getPositionSize(
-        this.config.initial_margin_position,
+        this.config.initial_margin_position *
+          balance.wallet_balance *
+          this.config.leverage,
         lastCandle.close,
         this.symbolInfos[symbol]
       );
@@ -222,20 +214,30 @@ class Bot {
   }
 
   private async onExecutionOrder(order: WebsocketOrder[]) {
+    const balance = (await this.client.getWalletBalance()).result[
+      this.config.base
+    ];
+
     const positions = await this.client.getPosition({
       symbol: order[0].symbol,
     });
 
     const position = positions.result[0]; // 0: buy side 1: Sell side
 
+    const initialMargin =
+      (position.size * position.entry_price) / this.config.leverage;
+    const maxMargin =
+      this.config.max_margin_position *
+      balance.wallet_balance *
+      this.config.leverage;
+
+    // Buy order is activated
     if (position.position_margin > 0) {
       this.client.cancelAllActiveOrders({ symbol: position.symbol });
 
       const tp = calculatePrice(
         position.entry_price,
-        position.position_margin < this.config.max_margin_position
-          ? this.config.take_profit_percent
-          : 0,
+        this.config.take_profit_percent,
         this.symbolInfos[position.symbol]
       );
       const repurchase = calculatePrice(
@@ -262,7 +264,7 @@ class Bot {
         })
         .catch(error);
 
-      if (position.position_margin < this.config.max_margin_position) {
+      if (initialMargin < maxMargin) {
         // Repurchase order
         this.client
           .placeActiveOrder({

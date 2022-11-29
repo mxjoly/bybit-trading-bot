@@ -17,7 +17,7 @@ export const getWsConfig = (
   */
 
   // defaults to false == testnet. Set to true for livenet.
-  livenet: nodeEnv === 'production',
+  testnet: nodeEnv !== 'production',
 
   // NOTE: to listen to multiple markets (spot vs inverse vs linear vs linearfutures) at once, make one WebsocketClient instance per market
 
